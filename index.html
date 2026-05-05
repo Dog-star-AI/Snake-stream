@@ -288,9 +288,9 @@
 
     const gridSize = 24;
     const cells = canvas.width / gridSize;
-    const baseSpeed = 8;
-    const speedStep = 1;
-    const speedInterval = 5;
+    const baseSpeed = 6;
+    const speedStep = 0.4;
+    const speedInterval = 8;
     const appleCount = 3;
     const appleLifetime = 6000;
     const bombSpawnInterval = 10;
@@ -467,7 +467,7 @@
 
       bombSessionId += 1;
       const sessionId = bombSessionId;
-      bombSessions.set(sessionId, { hits: 0 });
+      bombSessions.set(sessionId, { hits: 0, expectedHits: sessionSize });
 
       for (let index = 0; index < sessionSize; index += 1) {
         bombs.push({
@@ -567,7 +567,7 @@
         return null;
       }
 
-      if (Math.random() < 0.08) {
+      if (Math.random() < 0.03) {
         return safeMoves[Math.floor(Math.random() * safeMoves.length)];
       }
 
@@ -577,9 +577,15 @@
       }, { apple: apples[0], dist: Infinity }).apple;
 
       safeMoves.sort((a, b) => {
-        const aDist = Math.abs(head.x + a.x - target.x) + Math.abs(head.y + a.y - target.y);
-        const bDist = Math.abs(head.x + b.x - target.x) + Math.abs(head.y + b.y - target.y);
-        return aDist - bDist;
+        const aNext = { x: head.x + a.x, y: head.y + a.y };
+        const bNext = { x: head.x + b.x, y: head.y + b.y };
+        const aDist = Math.abs(aNext.x - target.x) + Math.abs(aNext.y - target.y);
+        const bDist = Math.abs(bNext.x - target.x) + Math.abs(bNext.y - target.y);
+        const aCenter = Math.min(aNext.x, cells - 1 - aNext.x) + Math.min(aNext.y, cells - 1 - aNext.y);
+        const bCenter = Math.min(bNext.x, cells - 1 - bNext.x) + Math.min(bNext.y, cells - 1 - bNext.y);
+        const aScore = aDist - aCenter * 0.3;
+        const bScore = bDist - bCenter * 0.3;
+        return aScore - bScore;
       });
 
       return safeMoves[0];
@@ -593,20 +599,21 @@
       for (const bomb of bombs) {
         if (!bomb.explodedAt && now >= bomb.detonatesAt) {
           bomb.explodedAt = now;
-          bomb.explosionHits = cellHitsSnake(getBombBlastCells(bomb));
-          if (bomb.explosionHits && !bomb.countedHit) {
+          playTone(120, 0.12, 'sawtooth', 0.05);
+        }
+
+        if (bomb.explodedAt && now - bomb.explodedAt <= explosionDuration) {
+          if (!bomb.countedHit && cellHitsSnake(getBombBlastCells(bomb))) {
             bomb.countedHit = true;
             const session = bombSessions.get(bomb.sessionId);
             if (session) {
               session.hits += 1;
-              const expectedHits = bombs.filter(candidate => candidate.sessionId === bomb.sessionId).length;
-              if (session.hits >= expectedHits) {
+              if (session.hits >= session.expectedHits) {
                 showGameOver();
                 return;
               }
             }
           }
-          playTone(120, 0.12, 'sawtooth', 0.05);
         }
       }
 
