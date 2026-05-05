@@ -55,11 +55,6 @@
       padding: 0 2px;
     }
 
-    .status-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
 
     .controls {
       display: flex;
@@ -78,23 +73,6 @@
       letter-spacing: 0.04em;
     }
 
-    .toggle {
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      background: rgba(7, 17, 31, 0.72);
-      color: var(--text);
-      border-radius: 999px;
-      padding: 6px 12px;
-      font-size: 0.76rem;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      cursor: pointer;
-    }
-
-    .toggle.active {
-      background: rgba(121, 168, 255, 0.22);
-      border-color: rgba(121, 168, 255, 0.6);
-      color: #ffffff;
-    }
 
     .keys {
       --key-size: 22px;
@@ -243,9 +221,6 @@
   <main class="shell">
     <section class="statusbar" aria-label="Game status">
       <div class="score" id="score">0</div>
-      <div class="status-actions">
-        <button class="toggle" id="bot-toggle" type="button">Bot: Off</button>
-      </div>
     </section>
 
     <section class="board" aria-label="Snake game board">
@@ -283,7 +258,6 @@
     const overlayTitle = document.getElementById('overlay-title');
     const overlayScore = document.getElementById('overlay-score');
     const overlayButton = document.getElementById('overlay-button');
-    const botToggle = document.getElementById('bot-toggle');
     const keyIndicators = new Map([...document.querySelectorAll('.key')].map(element => [element.dataset.key, element]));
 
     const gridSize = 24;
@@ -300,6 +274,9 @@
     const blastRadius = 1;
     const minimumBombsPerSession = 1;
     const maximumBombsPerSession = 4;
+    const winScore = 80;
+    const modeOrder = ['risky', 'risky', 'win'];
+    const restartDelayMs = 4000;
 
     let snake;
     let direction;
@@ -312,6 +289,10 @@
     let running = false;
     let gameOver = false;
     let currentSpeed = baseSpeed;
+    let modeIndex = -1;
+    let currentMode = 'risky';
+    let botEnabled = true;
+    let restartTimer = null;
     let lastFrame = 0;
     let stepAccumulator = 0;
     let audioContext;
@@ -323,7 +304,7 @@
     let bombRadius = 8;
     let gridAlpha = 0.05;
     let touchStart = null;
-    let botEnabled = false;
+    let botTargetKey = null;
 
     function updateLayout() {
       const compact = window.matchMedia('(max-width: 640px)').matches;
@@ -335,12 +316,29 @@
       gridAlpha = compact ? 0.03 : 0.05;
     }
 
-    function setBotEnabled(enabled) {
-      botEnabled = enabled;
-      botToggle.classList.toggle('active', botEnabled);
-      botToggle.textContent = `Bot: ${botEnabled ? 'On' : 'Off'}`;
-      if (botEnabled && !running) {
+    function scheduleRestart() {
+      if (restartTimer) {
+        clearTimeout(restartTimer);
+      }
+      restartTimer = setTimeout(() => {
+        resetGame();
         startGame();
+      }, restartDelayMs);
+    }
+
+    function setBotKeyIndicator(direction) {
+      const key = direction.x === 0 && direction.y === -1 ? 'ArrowUp'
+        : direction.x === 0 && direction.y === 1 ? 'ArrowDown'
+        : direction.x === -1 && direction.y === 0 ? 'ArrowLeft'
+        : direction.x === 1 && direction.y === 0 ? 'ArrowRight'
+        : null;
+
+      if (botTargetKey && botTargetKey !== key) {
+        setKeyIndicator(botTargetKey, false);
+      }
+      botTargetKey = key;
+      if (key) {
+        setKeyIndicator(key, true);
       }
     }
 
@@ -394,6 +392,8 @@
     }
 
     function resetGame() {
+      modeIndex = (modeIndex + 1) % modeOrder.length;
+      currentMode = modeOrder[modeIndex];
       snake = [
         { x: 10, y: 10 },
         { x: 9, y: 10 },
@@ -414,10 +414,14 @@
       while (apples.length < appleCount) {
         apples.push(spawnApple());
       }
-      overlayTitle.textContent = 'Ready';
+      overlayTitle.textContent = currentMode === 'win' ? 'Win Mode' : 'Risky Mode';
       overlayScore.textContent = 'Score: 0';
       overlayButton.textContent = 'Start';
       overlay.classList.add('visible');
+      if (botTargetKey) {
+        setKeyIndicator(botTargetKey, false);
+        botTargetKey = null;
+      }
     }
 
     function spawnApple() {
@@ -667,6 +671,7 @@
         const chosen = chooseBotDirection();
         if (chosen) {
           setDirection(chosen.x, chosen.y);
+          setBotKeyIndicator(chosen);
         }
       }
       direction = nextDirection;
@@ -694,6 +699,11 @@
         playTone(780, 0.06, 'triangle', 0.045);
         apples.splice(appleIndex, 1);
         apples.push(spawnApple());
+
+        if (score >= winScore) {
+          showWin();
+          return;
+        }
 
         if (score % bombSpawnInterval === 0) {
           spawnBombSession();
@@ -730,7 +740,6 @@
       context.beginPath();
       context.arc(left + size - eyeOffsetX, top + eyeOffsetY, headEyeSize, 0, Math.PI * 2);
       context.fill();
-    }
 
     function drawFruit(x, y) {
       const cx = x * gridSize + gridSize / 2;
@@ -891,6 +900,9 @@
     }
 
     document.addEventListener('keydown', event => {
+      if (botEnabled) {
+        return;
+      }
       const key = event.key;
       const lowerKey = key.toLowerCase();
 
@@ -921,6 +933,9 @@
 
     document.querySelectorAll('.key').forEach(button => {
       button.addEventListener('pointerdown', event => {
+        if (botEnabled) {
+          return;
+        }
         event.preventDefault();
         const key = button.dataset.key;
         if (key === 'ArrowUp') setDirection(0, -1);
@@ -938,9 +953,11 @@
     });
 
     overlayButton.addEventListener('click', startGame);
-    botToggle.addEventListener('click', () => setBotEnabled(!botEnabled));
 
     document.addEventListener('keyup', event => {
+      if (botEnabled) {
+        return;
+      }
       const key = event.key;
 
       if (key === 'ArrowUp' || key.toLowerCase() === 'w') setKeyIndicator('ArrowUp', false);
@@ -950,6 +967,9 @@
     });
 
     canvas.addEventListener('touchstart', event => {
+      if (botEnabled) {
+        return;
+      }
       if (event.touches.length !== 1) {
         return;
       }
@@ -960,6 +980,9 @@
     }, { passive: true });
 
     canvas.addEventListener('touchmove', event => {
+      if (botEnabled) {
+        return;
+      }
       if (!touchStart || event.touches.length !== 1) {
         return;
       }
@@ -989,7 +1012,7 @@
     updateLayout();
     window.addEventListener('resize', updateLayout);
     resetGame();
-    draw();
+    startGame();
   </script>
 </body>
 </html>
