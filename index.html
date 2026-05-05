@@ -55,6 +55,12 @@
       padding: 0 2px;
     }
 
+    .status-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     .controls {
       display: flex;
       justify-content: center;
@@ -70,6 +76,24 @@
       color: var(--text);
       font-size: 0.82rem;
       letter-spacing: 0.04em;
+    }
+
+    .toggle {
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(7, 17, 31, 0.72);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 0.76rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+
+    .toggle.active {
+      background: rgba(121, 168, 255, 0.22);
+      border-color: rgba(121, 168, 255, 0.6);
+      color: #ffffff;
     }
 
     .keys {
@@ -219,6 +243,9 @@
   <main class="shell">
     <section class="statusbar" aria-label="Game status">
       <div class="score" id="score">0</div>
+      <div class="status-actions">
+        <button class="toggle" id="bot-toggle" type="button">Bot: Off</button>
+      </div>
     </section>
 
     <section class="board" aria-label="Snake game board">
@@ -256,6 +283,7 @@
     const overlayTitle = document.getElementById('overlay-title');
     const overlayScore = document.getElementById('overlay-score');
     const overlayButton = document.getElementById('overlay-button');
+    const botToggle = document.getElementById('bot-toggle');
     const keyIndicators = new Map([...document.querySelectorAll('.key')].map(element => [element.dataset.key, element]));
 
     const gridSize = 24;
@@ -295,6 +323,7 @@
     let bombRadius = 8;
     let gridAlpha = 0.05;
     let touchStart = null;
+    let botEnabled = false;
 
     function updateLayout() {
       const compact = window.matchMedia('(max-width: 640px)').matches;
@@ -304,6 +333,15 @@
       appleRadius = compact ? 9 : 8;
       bombRadius = compact ? 9 : 8;
       gridAlpha = compact ? 0.03 : 0.05;
+    }
+
+    function setBotEnabled(enabled) {
+      botEnabled = enabled;
+      botToggle.classList.toggle('active', botEnabled);
+      botToggle.textContent = `Bot: ${botEnabled ? 'On' : 'Off'}`;
+      if (botEnabled && !running) {
+        startGame();
+      }
     }
 
     function getAudioContext() {
@@ -475,6 +513,78 @@
       return cellsInBlast;
     }
 
+    function getDangerCells(now, lookaheadMs) {
+      const danger = new Set();
+      for (const bomb of bombs) {
+        if (bomb.explodedAt && now - bomb.explodedAt <= explosionDuration) {
+          for (const cell of getBombBlastCells(bomb)) {
+            danger.add(`${cell.x},${cell.y}`);
+          }
+          continue;
+        }
+
+        if (!bomb.explodedAt && bomb.detonatesAt - now <= lookaheadMs) {
+          for (const cell of getBombBlastCells(bomb)) {
+            danger.add(`${cell.x},${cell.y}`);
+          }
+        }
+      }
+      return danger;
+    }
+
+    function chooseBotDirection() {
+      const now = performance.now();
+      const stepMs = 1000 / currentSpeed;
+      const danger = getDangerCells(now, stepMs * 2.2);
+      const head = snake[0];
+      const possible = [
+        { x: 0, y: -1 },
+        { x: 0, y: 1 },
+        { x: -1, y: 0 },
+        { x: 1, y: 0 }
+      ];
+
+      const safeMoves = possible.filter(dir => {
+        if (isOpposite(dir, direction)) {
+          return false;
+        }
+        const next = { x: head.x + dir.x, y: head.y + dir.y };
+        if (next.x < 0 || next.x >= cells || next.y < 0 || next.y >= cells) {
+          return false;
+        }
+        const willEatApple = apples.some(apple => apple.x === next.x && apple.y === next.y);
+        const bodyToCheck = willEatApple ? snake : snake.slice(0, -1);
+        if (bodyToCheck.some(part => part.x === next.x && part.y === next.y)) {
+          return false;
+        }
+        if (danger.has(`${next.x},${next.y}`)) {
+          return false;
+        }
+        return true;
+      });
+
+      if (safeMoves.length === 0) {
+        return null;
+      }
+
+      if (Math.random() < 0.08) {
+        return safeMoves[Math.floor(Math.random() * safeMoves.length)];
+      }
+
+      const target = apples.reduce((best, apple) => {
+        const dist = Math.abs(apple.x - head.x) + Math.abs(apple.y - head.y);
+        return dist < best.dist ? { apple, dist } : best;
+      }, { apple: apples[0], dist: Infinity }).apple;
+
+      safeMoves.sort((a, b) => {
+        const aDist = Math.abs(head.x + a.x - target.x) + Math.abs(head.y + a.y - target.y);
+        const bDist = Math.abs(head.x + b.x - target.x) + Math.abs(head.y + b.y - target.y);
+        return aDist - bDist;
+      });
+
+      return safeMoves[0];
+    }
+
     function cellHitsSnake(cellsInBlast) {
       return snake.some(segment => cellsInBlast.some(cell => cell.x === segment.x && cell.y === segment.y));
     }
@@ -546,6 +656,12 @@
     }
 
     function update() {
+      if (botEnabled) {
+        const chosen = chooseBotDirection();
+        if (chosen) {
+          setDirection(chosen.x, chosen.y);
+        }
+      }
       direction = nextDirection;
       const head = { x: snake[0].x + direction.x, y: snake[0].y + direction.y };
       const appleIndex = apples.findIndex(apple => apple.x === head.x && apple.y === head.y);
@@ -815,6 +931,7 @@
     });
 
     overlayButton.addEventListener('click', startGame);
+    botToggle.addEventListener('click', () => setBotEnabled(!botEnabled));
 
     document.addEventListener('keyup', event => {
       const key = event.key;
