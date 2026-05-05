@@ -55,7 +55,6 @@
       padding: 0 2px;
     }
 
-
     .controls {
       display: flex;
       justify-content: center;
@@ -72,7 +71,6 @@
       font-size: 0.82rem;
       letter-spacing: 0.04em;
     }
-
 
     .keys {
       --key-size: 22px;
@@ -539,7 +537,8 @@
     function chooseBotDirection() {
       const now = performance.now();
       const stepMs = 1000 / currentSpeed;
-      const danger = getDangerCells(now, stepMs * 2.2);
+      const lookahead = currentMode === 'win' ? stepMs * 3.2 : stepMs * 2.2;
+      const danger = getDangerCells(now, lookahead);
       const head = snake[0];
       const possible = [
         { x: 0, y: -1 },
@@ -571,7 +570,7 @@
         return null;
       }
 
-      if (Math.random() < 0.03) {
+      if (currentMode === 'risky' && Math.random() < 0.03) {
         return safeMoves[Math.floor(Math.random() * safeMoves.length)];
       }
 
@@ -587,8 +586,29 @@
         const bDist = Math.abs(bNext.x - target.x) + Math.abs(bNext.y - target.y);
         const aCenter = Math.min(aNext.x, cells - 1 - aNext.x) + Math.min(aNext.y, cells - 1 - aNext.y);
         const bCenter = Math.min(bNext.x, cells - 1 - bNext.x) + Math.min(bNext.y, cells - 1 - bNext.y);
-        const aScore = aDist - aCenter * 0.3;
-        const bScore = bDist - bCenter * 0.3;
+        const aSpace = possible.filter(dir => {
+          const probe = { x: aNext.x + dir.x, y: aNext.y + dir.y };
+          if (probe.x < 0 || probe.x >= cells || probe.y < 0 || probe.y >= cells) {
+            return false;
+          }
+          if (danger.has(`${probe.x},${probe.y}`)) {
+            return false;
+          }
+          return !snake.some(part => part.x === probe.x && part.y === probe.y);
+        }).length;
+        const bSpace = possible.filter(dir => {
+          const probe = { x: bNext.x + dir.x, y: bNext.y + dir.y };
+          if (probe.x < 0 || probe.x >= cells || probe.y < 0 || probe.y >= cells) {
+            return false;
+          }
+          if (danger.has(`${probe.x},${probe.y}`)) {
+            return false;
+          }
+          return !snake.some(part => part.x === probe.x && part.y === probe.y);
+        }).length;
+        const safetyBias = currentMode === 'win' ? 0.7 : 0.3;
+        const aScore = aDist - aCenter * 0.3 - aSpace * safetyBias;
+        const bScore = bDist - bCenter * 0.3 - bSpace * safetyBias;
         return aScore - bScore;
       });
 
@@ -624,6 +644,16 @@
       bombs = bombs.filter(bomb => !bomb.explodedAt || now - bomb.explodedAt <= explosionDuration);
     }
 
+    function showWin() {
+      running = false;
+      gameOver = true;
+      overlayTitle.textContent = 'You Won';
+      overlayScore.textContent = `Score: ${score}`;
+      overlayButton.textContent = 'Next';
+      overlay.classList.add('visible');
+      scheduleRestart();
+    }
+
     function showGameOver() {
       running = false;
       gameOver = true;
@@ -634,6 +664,7 @@
       overlay.classList.add('visible');
       playTone(180, 0.18, 'sawtooth', 0.06);
       playTone(120, 0.22, 'sawtooth', 0.05);
+      scheduleRestart();
     }
 
     function startGame() {
@@ -739,20 +770,6 @@
       context.fill();
       context.beginPath();
       context.arc(left + size - eyeOffsetX, top + eyeOffsetY, headEyeSize, 0, Math.PI * 2);
-      context.fill();
-
-    function drawFruit(x, y) {
-      const cx = x * gridSize + gridSize / 2;
-      const cy = y * gridSize + gridSize / 2;
-
-      context.fillStyle = '#ea4335';
-      context.beginPath();
-      context.arc(cx, cy + 1, 8, 0, Math.PI * 2);
-      context.fill();
-
-      context.fillStyle = '#137333';
-      context.beginPath();
-      context.ellipse(cx + 4, cy - 7, 4.5, 2.5, -0.6, 0, Math.PI * 2);
       context.fill();
     }
 
