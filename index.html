@@ -265,31 +265,17 @@
     const speedInterval = 8;
     const appleCount = 3;
     const appleLifetime = 6000;
-    const bombSpawnInterval = 10;
-    const bombFuseMin = 3200;
-    const bombFuseMax = 5200;
-    const explosionDuration = 900;
-    const blastRadius = 1;
-    const minimumBombsPerSession = 1;
-    const maximumBombsPerSession = 4;
     const winScore = 80;
-    const modeOrder = ['risky', 'risky', 'win'];
     const restartDelayMs = 4000;
 
     let snake;
     let direction;
     let nextDirection;
     let apples;
-    let bombs;
-    let bombSessions;
     let score;
-    let bombSessionId;
     let running = false;
     let gameOver = false;
     let currentSpeed = baseSpeed;
-    let modeIndex = -1;
-    let currentMode = 'risky';
-    let botEnabled = true;
     let restartTimer = null;
     let lastFrame = 0;
     let stepAccumulator = 0;
@@ -299,9 +285,7 @@
     let headInset = 2;
     let headEyeSize = 1.7;
     let appleRadius = 8;
-    let bombRadius = 8;
     let gridAlpha = 0.05;
-    let touchStart = null;
     let botTargetKey = null;
 
     function updateLayout() {
@@ -310,7 +294,6 @@
       headInset = cellInset;
       headEyeSize = compact ? 2.1 : 1.7;
       appleRadius = compact ? 9 : 8;
-      bombRadius = compact ? 9 : 8;
       gridAlpha = compact ? 0.03 : 0.05;
     }
 
@@ -390,8 +373,6 @@
     }
 
     function resetGame() {
-      modeIndex = (modeIndex + 1) % modeOrder.length;
-      currentMode = modeOrder[modeIndex];
       snake = [
         { x: 10, y: 10 },
         { x: 9, y: 10 },
@@ -402,17 +383,14 @@
       score = 0;
       scoreEl.textContent = score;
       currentSpeed = baseSpeed;
-      bombSessionId = 0;
       gameOver = false;
       stepAccumulator = 0;
       gameOverEl.classList.remove('visible');
       apples = [];
-      bombs = [];
-      bombSessions = new Map();
       while (apples.length < appleCount) {
         apples.push(spawnApple());
       }
-      overlayTitle.textContent = currentMode === 'win' ? 'Win Mode' : 'Risky Mode';
+      overlayTitle.textContent = 'Ready';
       overlayScore.textContent = 'Score: 0';
       overlayButton.textContent = 'Start';
       overlay.classList.add('visible');
@@ -446,99 +424,7 @@
       }
     }
 
-    function countOccupiedCells() {
-      return snake.length + apples.length + bombs.filter(bomb => !bomb.explodedAt).length;
-    }
-
-    function getBombSessionSize() {
-      const freeCells = Math.max(0, cells * cells - countOccupiedCells());
-      if (freeCells <= blastRadius * 4) {
-        return 0;
-      }
-
-      const availableForBombs = Math.max(0, freeCells - blastRadius * 4);
-      const scaledCount = Math.floor(availableForBombs / 50);
-      return Math.min(maximumBombsPerSession, Math.max(minimumBombsPerSession, scaledCount));
-    }
-
-    function spawnBombSession() {
-      const sessionSize = getBombSessionSize();
-      if (sessionSize <= 0) {
-        return;
-      }
-
-      bombSessionId += 1;
-      const sessionId = bombSessionId;
-      bombSessions.set(sessionId, { hits: 0, expectedHits: sessionSize });
-
-      for (let index = 0; index < sessionSize; index += 1) {
-        bombs.push({
-          ...spawnBombLocation(),
-          sessionId,
-          detonatesAt: performance.now() + bombFuseMin + Math.random() * (bombFuseMax - bombFuseMin),
-          explodedAt: null,
-          explosionHits: false,
-          countedHit: false
-        });
-      }
-    }
-
-    function spawnBombLocation() {
-      let candidate;
-      do {
-        candidate = {
-          x: Math.floor(Math.random() * cells),
-          y: Math.floor(Math.random() * cells)
-        };
-      } while (
-        snake && snake.some(part => part.x === candidate.x && part.y === candidate.y) ||
-        snake && snake.some(part => Math.abs(part.x - candidate.x) <= 1 && Math.abs(part.y - candidate.y) <= 1) ||
-        apples && apples.some(apple => apple.x === candidate.x && apple.y === candidate.y) ||
-        bombs && bombs.some(bomb => bomb.x === candidate.x && bomb.y === candidate.y)
-      );
-      return candidate;
-    }
-
-    function getBombBlastCells(bomb) {
-      const cellsInBlast = [];
-
-      for (let offsetY = -blastRadius; offsetY <= blastRadius; offsetY += 1) {
-        for (let offsetX = -blastRadius; offsetX <= blastRadius; offsetX += 1) {
-          const x = bomb.x + offsetX;
-          const y = bomb.y + offsetY;
-          if (x >= 0 && x < cells && y >= 0 && y < cells) {
-            cellsInBlast.push({ x, y });
-          }
-        }
-      }
-
-      return cellsInBlast;
-    }
-
-    function getDangerCells(now, lookaheadMs) {
-      const danger = new Set();
-      for (const bomb of bombs) {
-        if (bomb.explodedAt && now - bomb.explodedAt <= explosionDuration) {
-          for (const cell of getBombBlastCells(bomb)) {
-            danger.add(`${cell.x},${cell.y}`);
-          }
-          continue;
-        }
-
-        if (!bomb.explodedAt && bomb.detonatesAt - now <= lookaheadMs) {
-          for (const cell of getBombBlastCells(bomb)) {
-            danger.add(`${cell.x},${cell.y}`);
-          }
-        }
-      }
-      return danger;
-    }
-
     function chooseBotDirection() {
-      const now = performance.now();
-      const stepMs = 1000 / currentSpeed;
-      const lookahead = currentMode === 'win' ? stepMs * 3.2 : stepMs * 2.2;
-      const danger = getDangerCells(now, lookahead);
       const head = snake[0];
       const possible = [
         { x: 0, y: -1 },
@@ -557,21 +443,11 @@
         }
         const willEatApple = apples.some(apple => apple.x === next.x && apple.y === next.y);
         const bodyToCheck = willEatApple ? snake : snake.slice(0, -1);
-        if (bodyToCheck.some(part => part.x === next.x && part.y === next.y)) {
-          return false;
-        }
-        if (danger.has(`${next.x},${next.y}`)) {
-          return false;
-        }
-        return true;
+        return !bodyToCheck.some(part => part.x === next.x && part.y === next.y);
       });
 
       if (safeMoves.length === 0) {
         return null;
-      }
-
-      if (currentMode === 'risky' && Math.random() < 0.03) {
-        return safeMoves[Math.floor(Math.random() * safeMoves.length)];
       }
 
       const target = apples.reduce((best, apple) => {
@@ -584,64 +460,45 @@
         const bNext = { x: head.x + b.x, y: head.y + b.y };
         const aDist = Math.abs(aNext.x - target.x) + Math.abs(aNext.y - target.y);
         const bDist = Math.abs(bNext.x - target.x) + Math.abs(bNext.y - target.y);
-        const aCenter = Math.min(aNext.x, cells - 1 - aNext.x) + Math.min(aNext.y, cells - 1 - aNext.y);
-        const bCenter = Math.min(bNext.x, cells - 1 - bNext.x) + Math.min(bNext.y, cells - 1 - bNext.y);
-        const aSpace = possible.filter(dir => {
-          const probe = { x: aNext.x + dir.x, y: aNext.y + dir.y };
-          if (probe.x < 0 || probe.x >= cells || probe.y < 0 || probe.y >= cells) {
-            return false;
-          }
-          if (danger.has(`${probe.x},${probe.y}`)) {
-            return false;
-          }
-          return !snake.some(part => part.x === probe.x && part.y === probe.y);
-        }).length;
-        const bSpace = possible.filter(dir => {
-          const probe = { x: bNext.x + dir.x, y: bNext.y + dir.y };
-          if (probe.x < 0 || probe.x >= cells || probe.y < 0 || probe.y >= cells) {
-            return false;
-          }
-          if (danger.has(`${probe.x},${probe.y}`)) {
-            return false;
-          }
-          return !snake.some(part => part.x === probe.x && part.y === probe.y);
-        }).length;
-        const safetyBias = currentMode === 'win' ? 0.7 : 0.3;
-        const aScore = aDist - aCenter * 0.3 - aSpace * safetyBias;
-        const bScore = bDist - bCenter * 0.3 - bSpace * safetyBias;
+        const aSpace = floodFillCount(aNext, snake.slice(0, -1));
+        const bSpace = floodFillCount(bNext, snake.slice(0, -1));
+        const aScore = aDist - aSpace * 0.02;
+        const bScore = bDist - bSpace * 0.02;
         return aScore - bScore;
       });
 
       return safeMoves[0];
     }
 
-    function cellHitsSnake(cellsInBlast) {
-      return snake.some(segment => cellsInBlast.some(cell => cell.x === segment.x && cell.y === segment.y));
-    }
+    function floodFillCount(start, body) {
+      const blocked = new Set(body.map(part => `${part.x},${part.y}`));
+      const queue = [start];
+      const visited = new Set([`${start.x},${start.y}`]);
+      let count = 0;
 
-    function updateBombs(now) {
-      for (const bomb of bombs) {
-        if (!bomb.explodedAt && now >= bomb.detonatesAt) {
-          bomb.explodedAt = now;
-          playTone(120, 0.12, 'sawtooth', 0.05);
-        }
-
-        if (bomb.explodedAt && now - bomb.explodedAt <= explosionDuration) {
-          if (!bomb.countedHit && cellHitsSnake(getBombBlastCells(bomb))) {
-            bomb.countedHit = true;
-            const session = bombSessions.get(bomb.sessionId);
-            if (session) {
-              session.hits += 1;
-              if (session.hits >= session.expectedHits) {
-                showGameOver();
-                return;
-              }
-            }
+      while (queue.length) {
+        const cell = queue.shift();
+        count += 1;
+        const neighbors = [
+          { x: cell.x + 1, y: cell.y },
+          { x: cell.x - 1, y: cell.y },
+          { x: cell.x, y: cell.y + 1 },
+          { x: cell.x, y: cell.y - 1 }
+        ];
+        for (const next of neighbors) {
+          if (next.x < 0 || next.x >= cells || next.y < 0 || next.y >= cells) {
+            continue;
           }
+          const key = `${next.x},${next.y}`;
+          if (visited.has(key) || blocked.has(key)) {
+            continue;
+          }
+          visited.add(key);
+          queue.push(next);
         }
       }
 
-      bombs = bombs.filter(bomb => !bomb.explodedAt || now - bomb.explodedAt <= explosionDuration);
+      return count;
     }
 
     function showWin() {
@@ -680,11 +537,6 @@
       requestAnimationFrame(loop);
     }
 
-    function restartGame() {
-      resetGame();
-      startGame();
-    }
-
     function isOpposite(a, b) {
       return a.x + b.x === 0 && a.y + b.y === 0;
     }
@@ -698,12 +550,10 @@
     }
 
     function update() {
-      if (botEnabled) {
-        const chosen = chooseBotDirection();
-        if (chosen) {
-          setDirection(chosen.x, chosen.y);
-          setBotKeyIndicator(chosen);
-        }
+      const chosen = chooseBotDirection();
+      if (chosen) {
+        setDirection(chosen.x, chosen.y);
+        setBotKeyIndicator(chosen);
       }
       direction = nextDirection;
       const head = { x: snake[0].x + direction.x, y: snake[0].y + direction.y };
@@ -734,10 +584,6 @@
         if (score >= winScore) {
           showWin();
           return;
-        }
-
-        if (score % bombSpawnInterval === 0) {
-          spawnBombSession();
         }
       } else {
         snake.pop();
@@ -770,56 +616,6 @@
       context.fill();
       context.beginPath();
       context.arc(left + size - eyeOffsetX, top + eyeOffsetY, headEyeSize, 0, Math.PI * 2);
-      context.fill();
-    }
-
-    function drawBomb(bomb, now) {
-      const cx = bomb.x * gridSize + gridSize / 2;
-      const cy = bomb.y * gridSize + gridSize / 2;
-      const exploded = Boolean(bomb.explodedAt);
-
-      if (!exploded) {
-        const timeLeft = Math.max(0, bomb.detonatesAt - now);
-        const fuseProgress = Math.max(0, Math.min(1, 1 - timeLeft / (bombFuseMax - bombFuseMin)));
-        const pulse = 1 + Math.sin(now / 90) * 0.03;
-        const fuseLength = 8 + fuseProgress * 8;
-        context.save();
-        context.translate(cx, cy);
-        context.scale(pulse, pulse);
-        context.fillStyle = '#1c1f24';
-        context.beginPath();
-        context.arc(0, 0, bombRadius, 0, Math.PI * 2);
-        context.fill();
-        context.fillStyle = '#3a3f46';
-        context.beginPath();
-        context.arc(-2, -2, bombRadius * 0.6, 0, Math.PI * 2);
-        context.fill();
-        context.strokeStyle = '#c9a227';
-        context.lineWidth = 2;
-        context.beginPath();
-        context.moveTo(5, -5);
-        context.quadraticCurveTo(8 + fuseLength * 0.1, -12 - fuseLength * 0.2, 10 + fuseLength * 0.2, -14 - fuseLength * 0.1);
-        context.stroke();
-        context.fillStyle = fuseProgress > 0.7 ? '#ff7a59' : '#e0b15b';
-        context.beginPath();
-        context.arc(10 + fuseLength * 0.2, -14 - fuseLength * 0.1, 2.2, 0, Math.PI * 2);
-        context.fill();
-        context.restore();
-        return;
-      }
-
-      const elapsed = now - bomb.explodedAt;
-      const intensity = Math.max(0, 1 - elapsed / explosionDuration);
-      const blastCells = getBombBlastCells(bomb);
-
-      for (const cell of blastCells) {
-        context.fillStyle = `rgba(255, 122, 89, ${0.25 + intensity * 0.45})`;
-        context.fillRect(cell.x * gridSize + 1, cell.y * gridSize + 1, gridSize - 2, gridSize - 2);
-      }
-
-      context.fillStyle = `rgba(255, 233, 166, ${0.5 + intensity * 0.35})`;
-      context.beginPath();
-      context.arc(cx, cy, 9 + intensity * 5, 0, Math.PI * 2);
       context.fill();
     }
 
@@ -868,14 +664,9 @@
 
       const now = performance.now();
       refreshApples(now);
-      updateBombs(now);
 
       apples.forEach(apple => {
         drawApple(apple, now);
-      });
-
-      bombs.forEach(bomb => {
-        drawBomb(bomb, now);
       });
 
       snake.forEach((segment, index) => {
@@ -916,115 +707,7 @@
       }
     }
 
-    document.addEventListener('keydown', event => {
-      if (botEnabled) {
-        return;
-      }
-      const key = event.key;
-      const lowerKey = key.toLowerCase();
-
-      if (key === 'ArrowUp' || lowerKey === 'w') {
-        setDirection(0, -1);
-        setKeyIndicator('ArrowUp', true);
-      }
-
-      if (key === 'ArrowDown' || lowerKey === 's') {
-        setDirection(0, 1);
-        setKeyIndicator('ArrowDown', true);
-      }
-
-      if (key === 'ArrowLeft' || lowerKey === 'a') {
-        setDirection(-1, 0);
-        setKeyIndicator('ArrowLeft', true);
-      }
-
-      if (key === 'ArrowRight' || lowerKey === 'd') {
-        setDirection(1, 0);
-        setKeyIndicator('ArrowRight', true);
-      }
-
-      if (!running) {
-        startGame();
-      }
-    });
-
-    document.querySelectorAll('.key').forEach(button => {
-      button.addEventListener('pointerdown', event => {
-        if (botEnabled) {
-          return;
-        }
-        event.preventDefault();
-        const key = button.dataset.key;
-        if (key === 'ArrowUp') setDirection(0, -1);
-        if (key === 'ArrowDown') setDirection(0, 1);
-        if (key === 'ArrowLeft') setDirection(-1, 0);
-        if (key === 'ArrowRight') setDirection(1, 0);
-        setKeyIndicator(key, true);
-        if (!running) {
-          startGame();
-        }
-      });
-
-      button.addEventListener('pointerup', () => setKeyIndicator(button.dataset.key, false));
-      button.addEventListener('pointerleave', () => setKeyIndicator(button.dataset.key, false));
-    });
-
     overlayButton.addEventListener('click', startGame);
-
-    document.addEventListener('keyup', event => {
-      if (botEnabled) {
-        return;
-      }
-      const key = event.key;
-
-      if (key === 'ArrowUp' || key.toLowerCase() === 'w') setKeyIndicator('ArrowUp', false);
-      if (key === 'ArrowDown' || key.toLowerCase() === 's') setKeyIndicator('ArrowDown', false);
-      if (key === 'ArrowLeft' || key.toLowerCase() === 'a') setKeyIndicator('ArrowLeft', false);
-      if (key === 'ArrowRight' || key.toLowerCase() === 'd') setKeyIndicator('ArrowRight', false);
-    });
-
-    canvas.addEventListener('touchstart', event => {
-      if (botEnabled) {
-        return;
-      }
-      if (event.touches.length !== 1) {
-        return;
-      }
-      touchStart = {
-        x: event.touches[0].clientX,
-        y: event.touches[0].clientY
-      };
-    }, { passive: true });
-
-    canvas.addEventListener('touchmove', event => {
-      if (botEnabled) {
-        return;
-      }
-      if (!touchStart || event.touches.length !== 1) {
-        return;
-      }
-      const current = event.touches[0];
-      const dx = current.clientX - touchStart.x;
-      const dy = current.clientY - touchStart.y;
-      const threshold = 20;
-
-      if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) {
-        return;
-      }
-
-      if (Math.abs(dx) > Math.abs(dy)) {
-        setDirection(dx > 0 ? 1 : -1, 0);
-      } else {
-        setDirection(0, dy > 0 ? 1 : -1);
-      }
-
-      if (!running) {
-        startGame();
-      }
-
-      touchStart = { x: current.clientX, y: current.clientY };
-      event.preventDefault();
-    }, { passive: false });
 
     updateLayout();
     window.addEventListener('resize', updateLayout);
